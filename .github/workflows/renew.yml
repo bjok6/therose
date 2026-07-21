@@ -33,7 +33,11 @@ jobs:
             fonts-noto-cjk \
             libnss3 \
             libgbm1 \
-            libasound2
+            libasound2t64 \
+            libatk-bridge2.0-0 \
+            libgtk-3-0 \
+            libx11-xcb1 \
+            libxcb-dri3-0
 
       - name: 🐍 安装 Python 依赖
         run: |
