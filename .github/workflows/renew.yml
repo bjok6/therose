@@ -1,80 +1,83 @@
-name: Auto-Renew-Rose
+# TheRose 自动续期 - GitHub Actions 工作流
+# 使用方法：
+# 1. 新建仓库，放入 renew_therose.py 和本文件
+# 2. 将本文件放到 .github/workflows/renew_therose.yml
+# 3. 在仓库 Settings → Secrets and variables → Actions 中添加：
+#    EMAIL, PASSWORD, TG_BOT_TOKEN, TG_CHAT_ID（后两个可选）
+# 4. 可在 Actions 页手动 Run workflow 测试
+
+name: Renew TheRose
 
 on:
-  workflow_dispatch:          # 给 Cloudflare Worker 触发用
+  # 定时任务（UTC 时间）
+  # 默认每天 02:00 UTC ≈ 北京时间 10:00
+  schedule:
+    - cron: "0 2 * * *"
+  # 允许在 GitHub 网页上手动触发
+  workflow_dispatch:
+
+concurrency:
+  group: renew-therose
+  cancel-in-progress: false
 
 jobs:
-  Renew-Rose:
+  renew:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-    permissions:
-      contents: write
-      actions: write
+    timeout-minutes: 20
 
     steps:
-      - name: 📥 下载代码
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: 🐍 设置 Python
+      - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: "3.11"
+          cache: pip
 
-      - name: 🛠️ 安装系统依赖
+      - name: Install system dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
             xvfb \
-            x11-utils \
-            xdotool \
-            scrot \
-            fonts-noto-cjk \
+            xauth \
+            libgtk-3-0 \
+            libxss1 \
+            libasound2t64 \
             libnss3 \
             libgbm1 \
-            libasound2t64 \
-            libatk-bridge2.0-0 \
-            libgtk-3-0 \
-            libx11-xcb1 \
-            libxcb-dri3-0
+            fonts-liberation
 
-      - name: 🐍 安装 Python 依赖
+      - name: Install Python packages
         run: |
-          pip install --upgrade pip
-          pip install seleniumbase aiohttp requests
-          seleniumbase install chromedriver
+          python -m pip install --upgrade pip
+          pip install seleniumbase requests
 
-     # - name: 🌐 设置 sing-box 代理转发
-       # continue-on-error: true
-       #   NODE_LINK: ${{ secrets.NODE_LINK }}
-      #  run: |
-        #  if [ -n "$NODE_LINK" ]; then
-        #    bash <(wget -qO- https://main.ssss.nyc.mn/setup_proxy.sh)
-       #   else
-        #    echo "未配置 NODE_LINK，跳过代理设置"
-        #  fi
+      - name: Install Chrome (via SeleniumBase)
+        run: |
+          sbase get chromedriver
+          # 若系统无 Chrome，用 SeleniumBase 安装 Chromium
+          sbase get chromium || true
 
-      - name: 🚀 运行续期脚本
+      - name: Run renewal script
         env:
           EMAIL: ${{ secrets.EMAIL }}
           PASSWORD: ${{ secrets.PASSWORD }}
-          COOKIE_VALUE: ${{ secrets.COOKIE_VALUE }}
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+          # 无图形界面时用虚拟显示器跑 headed 浏览器（UC / Turnstile 需要）
+          DISPLAY: ":99"
         run: |
-          xvfb-run --auto-servernum --server-args="-screen 0 1920x1080x24" \
-            python3 app.py
+          # 脚本使用 headless=False + uc_gui_click_captcha，必须配合 Xvfb
+          xvfb-run -a --server-args="-screen 0 1920x1080x24" \
+            python renew_therose.py
 
-      - name: 🧹 清理旧的工作流运行记录
+      - name: Upload screenshots on failure / result
         if: always()
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          runs=$(gh run list --workflow="${{ github.workflow }}" --limit=20 --json databaseId --jq '.[].databaseId')
-          count=0
-          for run_id in $runs; do
-            count=$((count + 1))
-            if [ $count -gt 5 ]; then
-              echo "删除旧运行记录: $run_id"
-              gh run delete $run_id || true
-            fi
-          done
+        uses: actions/upload-artifact@v4
+        with:
+          name: renewal-screenshots-${{ github.run_id }}
+          path: |
+            *.png
+          if-no-files-found: ignore
+          retention-days: 7
