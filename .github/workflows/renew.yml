@@ -85,12 +85,13 @@ jobs:
           xvfb-run -a --server-args="-screen 0 1920x1080x24" \
             python renew_therose.py
 
-      - name: Upload screenshots
+      - name: Upload debug artifacts
         if: always()
         uses: actions/upload-artifact@v5
         with:
-          name: renewal-screenshots-${{ github.run_id }}
+          name: renewal-debug-${{ github.run_id }}
           path: |
             *.png
+            *.html
           if-no-files-found: ignore
           retention-days: 7
