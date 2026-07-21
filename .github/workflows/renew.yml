@@ -43,16 +43,15 @@ jobs:
           pip install seleniumbase aiohttp requests
           seleniumbase install chromedriver
 
-      - name: 🌐 设置 sing-box 代理转发
-        continue-on-error: true
-        env:
-          NODE_LINK: ${{ secrets.NODE_LINK }}
-        run: |
-          if [ -n "$NODE_LINK" ]; then
-            bash <(wget -qO- https://main.ssss.nyc.mn/setup_proxy.sh)
-          else
-            echo "未配置 NODE_LINK，跳过代理设置"
-          fi
+     # - name: 🌐 设置 sing-box 代理转发
+       # continue-on-error: true
+       #   NODE_LINK: ${{ secrets.NODE_LINK }}
+      #  run: |
+        #  if [ -n "$NODE_LINK" ]; then
+        #    bash <(wget -qO- https://main.ssss.nyc.mn/setup_proxy.sh)
+       #   else
+        #    echo "未配置 NODE_LINK，跳过代理设置"
+        #  fi
 
       - name: 🚀 运行续期脚本
         env:
