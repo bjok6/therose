@@ -1,9 +1,7 @@
 name: Auto-Renew-Rose
 
 on:
-  workflow_dispatch:          # 允许被 Cloudflare Worker 精准触发
-  # schedule:                 # 备用（不推荐作为主触发，因为不准）
-  #   - cron: '0 2 */3 * *'  # 如需保留可取消注释
+  workflow_dispatch:          # 给 Cloudflare Worker 触发用
 
 jobs:
   Renew-Rose:
@@ -45,7 +43,6 @@ jobs:
           pip install seleniumbase aiohttp requests
           seleniumbase install chromedriver
 
-      # 可选：如果需要代理（和你原来的一样）
       - name: 🌐 设置 sing-box 代理转发
         continue-on-error: true
         env:
@@ -65,7 +62,7 @@ jobs:
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
         run: |
-          xvfb-run --auto-servernum --server-args="-screen 0 1366x768x24" \
+          xvfb-run --auto-servernum --server-args="-screen 0 1920x1080x24" \
             python3 app.py
 
       - name: 🧹 清理旧的工作流运行记录
@@ -73,12 +70,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # 只保留最近 3 次运行记录，防止堆积
-          runs=$(gh run list --workflow="${{ github.workflow }}" --limit=50 --json databaseId --jq '.[].databaseId')
+          runs=$(gh run list --workflow="${{ github.workflow }}" --limit=20 --json databaseId --jq '.[].databaseId')
           count=0
           for run_id in $runs; do
             count=$((count + 1))
-            if [ $count -gt 3 ]; then
+            if [ $count -gt 5 ]; then
               echo "删除旧运行记录: $run_id"
               gh run delete $run_id || true
             fi
