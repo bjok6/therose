@@ -1,0 +1,81 @@
+name: Auto-Renew-Rose
+
+on:
+  workflow_dispatch:          # 允许被 Cloudflare Worker 精准触发
+  # schedule:                 # 备用（不推荐作为主触发，因为不准）
+  #   - cron: '0 2 */3 * *'  # 如需保留可取消注释
+
+jobs:
+  Renew-Rose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      actions: write
+
+    steps:
+      - name: 📥 下载代码
+        uses: actions/checkout@v4
+
+      - name: 🐍 设置 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 🛠️ 安装系统依赖
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            xvfb \
+            x11-utils \
+            xdotool \
+            scrot \
+            fonts-noto-cjk \
+            libnss3 \
+            libgbm1 \
+            libasound2
+
+      - name: 🐍 安装 Python 依赖
+        run: |
+          pip install --upgrade pip
+          pip install seleniumbase aiohttp requests
+          seleniumbase install chromedriver
+
+      # 可选：如果需要代理（和你原来的一样）
+      - name: 🌐 设置 sing-box 代理转发
+        continue-on-error: true
+        env:
+          NODE_LINK: ${{ secrets.NODE_LINK }}
+        run: |
+          if [ -n "$NODE_LINK" ]; then
+            bash <(wget -qO- https://main.ssss.nyc.mn/setup_proxy.sh)
+          else
+            echo "未配置 NODE_LINK，跳过代理设置"
+          fi
+
+      - name: 🚀 运行续期脚本
+        env:
+          EMAIL: ${{ secrets.EMAIL }}
+          PASSWORD: ${{ secrets.PASSWORD }}
+          COOKIE_VALUE: ${{ secrets.COOKIE_VALUE }}
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+        run: |
+          xvfb-run --auto-servernum --server-args="-screen 0 1366x768x24" \
+            python3 app.py
+
+      - name: 🧹 清理旧的工作流运行记录
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # 只保留最近 3 次运行记录，防止堆积
+          runs=$(gh run list --workflow="${{ github.workflow }}" --limit=50 --json databaseId --jq '.[].databaseId')
+          count=0
+          for run_id in $runs; do
+            count=$((count + 1))
+            if [ $count -gt 3 ]; then
+              echo "删除旧运行记录: $run_id"
+              gh run delete $run_id || true
+            fi
+          done
