@@ -1,19 +1,20 @@
 # TheRose 自动续期 - GitHub Actions 工作流
 # 使用方法：
-# 1. 新建仓库，放入 renew_therose.py、requirements.txt 和本文件
-# 2. 将本文件放到 .github/workflows/renew_therose.yml
-# 3. 在仓库 Settings → Secrets and variables → Actions 中添加：
-#    EMAIL, PASSWORD, TG_BOT_TOKEN, TG_CHAT_ID（后两个可选）
-# 4. 可在 Actions 页手动 Run workflow 测试
+# 1. 仓库放入 renew_therose.py、requirements.txt
+# 2. 本文件放到 .github/workflows/renew_therose.yml
+# 3. Secrets:
+#    必填: EMAIL, PASSWORD
+#    推荐: PROXY  （例如 http://user:pass@host:port 或 socks5://user:pass@host:port）
+#    可选: TG_BOT_TOKEN, TG_CHAT_ID
+#    也可拆分: PROXY_HOST, PROXY_PORT, PROXY_USER, PROXY_PASS, PROXY_SCHEME
+# 4. Actions 页手动 Run workflow 测试
 
 name: Renew TheRose
 
 on:
-  # 定时任务（UTC 时间）
-  # 默认每天 02:00 UTC ≈ 北京时间 10:00
   schedule:
+    # 每天 02:00 UTC ≈ 北京时间 10:00
     - cron: "0 2 * * *"
-  # 允许在 GitHub 网页上手动触发
   workflow_dispatch:
 
 concurrency:
@@ -23,7 +24,7 @@ concurrency:
 jobs:
   renew:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
 
     steps:
       - name: Checkout
@@ -33,7 +34,6 @@ jobs:
         uses: actions/setup-python@v6
         with:
           python-version: "3.11"
-          # 需要仓库根目录有 requirements.txt，否则 cache 会报错
           cache: pip
           cache-dependency-path: requirements.txt
 
@@ -43,22 +43,27 @@ jobs:
           sudo apt-get install -y \
             xvfb \
             xauth \
+            xdotool \
+            scrot \
             libgtk-3-0 \
             libxss1 \
             libasound2t64 \
             libnss3 \
             libgbm1 \
-            fonts-liberation
+            fonts-liberation \
+            python3-tk \
+            python3-dev
 
       - name: Install Python packages
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+          # uc_gui_click_captcha 在 Xvfb 下需要 pyautogui
+          pip install pyautogui Pillow
 
       - name: Install Chrome (via SeleniumBase)
         run: |
           sbase get chromedriver
-          # 若系统无 Chrome，用 SeleniumBase 安装 Chromium
           sbase get chromium || true
 
       - name: Run renewal script
@@ -67,14 +72,20 @@ jobs:
           PASSWORD: ${{ secrets.PASSWORD }}
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
-          # 无图形界面时用虚拟显示器跑 headed 浏览器（UC / Turnstile 需要）
+          # 推荐整条写入 PROXY secret
+          PROXY: ${{ secrets.PROXY }}
+          # 或拆分写入（PROXY 为空时生效）
+          PROXY_HOST: ${{ secrets.PROXY_HOST }}
+          PROXY_PORT: ${{ secrets.PROXY_PORT }}
+          PROXY_USER: ${{ secrets.PROXY_USER }}
+          PROXY_PASS: ${{ secrets.PROXY_PASS }}
+          PROXY_SCHEME: ${{ secrets.PROXY_SCHEME }}
           DISPLAY: ":99"
         run: |
-          # 脚本使用 headless=False + uc_gui_click_captcha，必须配合 Xvfb
           xvfb-run -a --server-args="-screen 0 1920x1080x24" \
             python renew_therose.py
 
-      - name: Upload screenshots on failure / result
+      - name: Upload screenshots
         if: always()
         uses: actions/upload-artifact@v5
         with:
