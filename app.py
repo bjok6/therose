@@ -93,38 +93,67 @@ def send_tg(token, chat_id, message):
 # 登录流程
 def login(sb, email, password):
     print("🌐 打开登录页面...")
-    print("⏳ 等待页面加载...")
     sb.open(BASE_URL)
     sb.wait_for_ready_state_complete()
-    sb.sleep(1)
+    sb.sleep(2)
+
     print("📧 填写邮箱...")
-    sb.type('#login_form_email', email, timeout=10)
+    sb.type('#login_form_email', email, timeout=15)
+    sb.sleep(0.5)
+
     print("🔑 填写密码...")
     sb.type('#login_form_password', password, timeout=10)
-    time.sleep(1) 
+    sb.sleep(1)
+
     print("🛡 处理 Turnstile...")
     try:
-        sb.uc_gui_click_captcha()
-        print("✅ Turnstile 验证已处理")
-        # sb.save_screenshot("turnstile_passed.png")
+        # 多次尝试点击验证码
+        for i in range(3):
+            try:
+                sb.uc_gui_click_captcha()
+                print(f"✅ Turnstile 第 {i+1} 次点击")
+                sb.sleep(2)
+                break
+            except:
+                sb.sleep(1)
     except Exception as e:
-        print(f"⚠️ uc_gui_click_captcha 执行异常: {e}")
+        print(f"⚠️ Turnstile 处理异常: {e}")
+
+    sb.sleep(2)
+
     print("🔑 点击登录按钮...")
-    sb.uc_click('button:contains("Sign in")')
-    sb.sleep(3)
-    for _ in range(30):
-        # 判断是否登录成功
+    # 尝试多种点击方式
+    try:
+        sb.uc_click('button:contains("Sign in")', timeout=5)
+    except:
+        try:
+            sb.click('button[type="submit"]')
+        except:
+            sb.execute_script('document.querySelector("button[type=submit]").click()')
+
+    print("⏳ 等待登录跳转...")
+    for i in range(40):   # 增加到40秒
         current_url = sb.get_current_url()
-        page_title = sb.get_title() or ""
-        print(f"📄 当前 URL: {current_url} | Title: {page_title}")
-        if "panel" in current_url:
-            print("✅ 登录成功，已跳转到 Dashboard")
-            # sb.save_screenshot("login_success.png")
+        print(f"📄 当前 URL: {current_url}")
+        
+        if "panel" in current_url or "dashboard" in current_url or "server" in current_url:
+            print("✅ 登录成功！")
+            sb.save_screenshot("login_success.png")
             return True, current_url
-        time.sleep(1)
+        
+        # 检查是否有错误提示
+        try:
+            error = sb.find_element('..alert-danger, .error, .invalid-feedback', timeout=0.5)
+            if error:
+                print(f"❌ 登录错误提示: {error.text}")
+                break
+        except:
+            pass
+            
+        sb.sleep(1)
 
     print(f"❌ 登录失败，当前 URL: {sb.get_current_url()}")
-    sb.save_screenshot("login_faild.png")
+    sb.save_screenshot("login_failed.png")
     return False, sb.get_current_url()
 
 # 主流程
