@@ -1,19 +1,28 @@
-# TheRose 自动续期 - GitHub Actions 工作流
-# 使用方法：
-# 1. 仓库放入 renew_therose.py、requirements.txt
-# 2. 本文件放到 .github/workflows/renew_therose.yml
-# 3. Secrets:
-#    必填: EMAIL, PASSWORD
-#    推荐: PROXY  （例如 http://user:pass@host:port 或 socks5://user:pass@host:port）
-#    可选: TG_BOT_TOKEN, TG_CHAT_ID
-#    也可拆分: PROXY_HOST, PROXY_PORT, PROXY_USER, PROXY_PASS, PROXY_SCHEME
-# 4. Actions 页手动 Run workflow 测试
+# TheRose 自动续期 - GitHub Actions（Hysteria2 / hy2）
+#
+# Chrome 不支持 hy2，流程是：
+#   1) 下载官方 hysteria 客户端
+#   2) 连你的 hy2 节点，并在本机开 SOCKS5 127.0.0.1:1080
+#   3) 脚本 PROXY=socks5://127.0.0.1:1080 走本地代理
+#
+# Secrets（hy2 三选一）：
+#   A) HY2_URI（推荐）
+#      hysteria2://密码@主机:443/?sni=xxx&insecure=1
+#      可选 query: obfs=salamander&obfs-password=xxx
+#   B) HY2_SERVER + HY2_AUTH
+#      HY2_SERVER=host:443
+#      HY2_AUTH=密码
+#      可选: HY2_SNI, HY2_INSECURE=true, HY2_OBFS=混淆密码
+#   C) HY2_CONFIG  完整客户端 yaml（会强制确保有 socks5:1080）
+#
+# 其它: EMAIL, PASSWORD 必填；TG_BOT_TOKEN, TG_CHAT_ID 可选
+#
+# 路径: .github/workflows/renew_therose.yml
 
 name: Renew TheRose
 
 on:
   schedule:
-    # 每天 02:00 UTC ≈ 北京时间 10:00
     - cron: "0 2 * * *"
   workflow_dispatch:
 
@@ -24,7 +33,7 @@ concurrency:
 jobs:
   renew:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 30
 
     steps:
       - name: Checkout
@@ -41,24 +50,179 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            xvfb \
-            xauth \
-            xdotool \
-            scrot \
-            libgtk-3-0 \
-            libxss1 \
-            libasound2t64 \
-            libnss3 \
-            libgbm1 \
-            fonts-liberation \
-            python3-tk \
-            python3-dev
+            xvfb xauth xdotool scrot \
+            libgtk-3-0 libxss1 libasound2t64 libnss3 libgbm1 \
+            fonts-liberation python3-tk python3-dev \
+            curl ca-certificates
+
+      - name: Install Hysteria2 client
+        run: |
+          set -e
+          curl -fsSL -o /tmp/hysteria \
+            "https://github.com/apernet/hysteria/releases/latest/download/hysteria-linux-amd64"
+          sudo install -m 755 /tmp/hysteria /usr/local/bin/hysteria
+          hysteria version || true
+
+      - name: Build hy2 config & start client
+        env:
+          HY2_URI: ${{ secrets.HY2_URI }}
+          HY2_CONFIG: ${{ secrets.HY2_CONFIG }}
+          HY2_SERVER: ${{ secrets.HY2_SERVER }}
+          HY2_AUTH: ${{ secrets.HY2_AUTH }}
+          HY2_SNI: ${{ secrets.HY2_SNI }}
+          HY2_INSECURE: ${{ secrets.HY2_INSECURE }}
+          HY2_OBFS: ${{ secrets.HY2_OBFS }}
+        run: |
+          set -e
+          mkdir -p "$HOME/.hy2"
+          CFG="$HOME/.hy2/client.yaml"
+
+          python3 - <<'PY'
+          import os, sys
+          from urllib.parse import urlparse, parse_qs, unquote
+          from pathlib import Path
+
+          cfg_path = Path.home() / ".hy2" / "client.yaml"
+          hy2_config = (os.environ.get("HY2_CONFIG") or "").strip()
+          hy2_uri = (os.environ.get("HY2_URI") or "").strip()
+          server = (os.environ.get("HY2_SERVER") or "").strip()
+          auth = (os.environ.get("HY2_AUTH") or "").strip()
+          sni = (os.environ.get("HY2_SNI") or "").strip()
+          insecure_raw = (os.environ.get("HY2_INSECURE") or "").strip().lower()
+          obfs = (os.environ.get("HY2_OBFS") or "").strip()
+
+          def truthy(v: str) -> bool:
+              return v in ("1", "true", "yes", "on")
+
+          def write_yaml(server, auth, sni="", insecure=False, obfs_password=""):
+              lines = [
+                  f"server: {server}",
+                  f"auth: {auth}",
+                  "",
+                  "tls:",
+              ]
+              if sni:
+                  lines.append(f"  sni: {sni}")
+              lines.append(f"  insecure: {'true' if insecure else 'false'}")
+              lines.append("")
+              if obfs_password:
+                  lines += [
+                      "obfs:",
+                      "  type: salamander",
+                      "  salamander:",
+                      f"    password: {obfs_password}",
+                      "",
+                  ]
+              lines += [
+                  "bandwidth:",
+                  "  up: 50 mbps",
+                  "  down: 100 mbps",
+                  "",
+                  "socks5:",
+                  "  listen: 127.0.0.1:1080",
+                  "http:",
+                  "  listen: 127.0.0.1:8080",
+                  "",
+                  "fastOpen: true",
+                  "",
+              ]
+              cfg_path.write_text("\n".join(lines), encoding="utf-8")
+              print(f"✅ 已写入 {cfg_path}")
+              print(f"   server={server} sni={sni or '-'} insecure={insecure} obfs={'yes' if obfs_password else 'no'}")
+
+          if hy2_config:
+              text = hy2_config
+              # 确保有本地 socks5
+              if "socks5:" not in text:
+                  text = text.rstrip() + "\n\nsocks5:\n  listen: 127.0.0.1:1080\nhttp:\n  listen: 127.0.0.1:8080\n"
+              cfg_path.write_text(text, encoding="utf-8")
+              print("✅ 使用 HY2_CONFIG")
+          elif hy2_uri:
+              # hysteria2://auth@host:port/?sni=...&insecure=1&obfs-password=...
+              u = urlparse(hy2_uri)
+              if u.scheme not in ("hysteria2", "hy2", "hysteria"):
+                  print(f"❌ HY2_URI scheme 不支持: {u.scheme}")
+                  sys.exit(1)
+              host = u.hostname
+              port = u.port or 443
+              if not host:
+                  print("❌ HY2_URI 缺少主机")
+                  sys.exit(1)
+              password = unquote(u.password or u.username or "")
+              # 有些链接把密码放在 username，server 在 hostname
+              if u.password is None and u.username and not password:
+                  password = unquote(u.username)
+              if u.password:
+                  password = unquote(u.password)
+              elif u.username:
+                  password = unquote(u.username)
+              if not password:
+                  print("❌ HY2_URI 缺少密码/auth")
+                  sys.exit(1)
+              q = parse_qs(u.query)
+              def qget(*keys, default=""):
+                  for k in keys:
+                      if k in q and q[k]:
+                          return q[k][0]
+                  return default
+              sni_q = qget("sni", "peer")
+              insecure_q = truthy(qget("insecure", "insecureSkipVerify", default="0"))
+              obfs_q = qget("obfs-password", "obfs_password", "obfsPassword")
+              if not obfs_q and qget("obfs") == "salamander":
+                  obfs_q = qget("obfs-password", "password")
+              write_yaml(f"{host}:{port}", password, sni=sni_q, insecure=insecure_q, obfs_password=obfs_q)
+              print("✅ 已从 HY2_URI 生成客户端配置")
+          elif server and auth:
+              write_yaml(
+                  server,
+                  auth,
+                  sni=sni,
+                  insecure=truthy(insecure_raw),
+                  obfs_password=obfs,
+              )
+              print("✅ 已从 HY2_SERVER/HY2_AUTH 生成客户端配置")
+          else:
+              print("❌ 请配置 HY2_URI，或 HY2_SERVER+HY2_AUTH，或 HY2_CONFIG")
+              sys.exit(1)
+          PY
+
+          echo "🚀 启动 Hysteria2 客户端..."
+          nohup hysteria client -c "$CFG" > "$HOME/.hy2/hy2.log" 2>&1 &
+          echo $! > "$HOME/.hy2/hy2.pid"
+          sleep 2
+
+          echo "⏳ 等待本地 SOCKS5 127.0.0.1:1080 ..."
+          OK=0
+          for i in $(seq 1 40); do
+            if curl -sS --max-time 3 --socks5-hostname 127.0.0.1:1080 https://api.ipify.org -o /tmp/hy2_ip.txt 2>/dev/null; then
+              if [ -s /tmp/hy2_ip.txt ]; then
+                OK=1
+                break
+              fi
+            fi
+            # 进程是否还活着
+            if ! kill -0 "$(cat "$HOME/.hy2/hy2.pid")" 2>/dev/null; then
+              echo "❌ hysteria 进程已退出"
+              break
+            fi
+            sleep 1
+          done
+
+          if [ "$OK" != "1" ]; then
+            echo "❌ Hysteria2 本地代理不可用"
+            echo "----- hy2.log -----"
+            cat "$HOME/.hy2/hy2.log" || true
+            echo "----- config (敏感字段已打码) -----"
+            sed -E 's/(auth:).*/\1 ***/; s/(password:).*/\1 ***/' "$CFG" || true
+            exit 1
+          fi
+
+          echo "✅ Hysteria2 就绪，出口 IP: $(cat /tmp/hy2_ip.txt)"
 
       - name: Install Python packages
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          # uc_gui_click_captcha 在 Xvfb 下需要 pyautogui
           pip install pyautogui Pillow
 
       - name: Install Chrome (via SeleniumBase)
@@ -72,18 +236,22 @@ jobs:
           PASSWORD: ${{ secrets.PASSWORD }}
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
-          # 推荐整条写入 PROXY secret
-          PROXY: ${{ secrets.PROXY }}
-          # 或拆分写入（PROXY 为空时生效）
-          PROXY_HOST: ${{ secrets.PROXY_HOST }}
-          PROXY_PORT: ${{ secrets.PROXY_PORT }}
-          PROXY_USER: ${{ secrets.PROXY_USER }}
-          PROXY_PASS: ${{ secrets.PROXY_PASS }}
-          PROXY_SCHEME: ${{ secrets.PROXY_SCHEME }}
+          # 走 hy2 客户端本地 SOCKS5
+          PROXY: socks5://127.0.0.1:1080
           DISPLAY: ":99"
         run: |
           xvfb-run -a --server-args="-screen 0 1920x1080x24" \
             python renew_therose.py
+
+      - name: Stop Hysteria2
+        if: always()
+        run: |
+          if [ -f "$HOME/.hy2/hy2.pid" ]; then
+            kill "$(cat "$HOME/.hy2/hy2.pid")" 2>/dev/null || true
+          fi
+          pkill -f 'hysteria client' 2>/dev/null || true
+          echo "----- hy2.log (tail) -----"
+          tail -n 100 "$HOME/.hy2/hy2.log" 2>/dev/null || true
 
       - name: Upload debug artifacts
         if: always()
