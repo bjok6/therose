@@ -1,2 +1,3 @@
 seleniumbase
 requests
+PySocks
