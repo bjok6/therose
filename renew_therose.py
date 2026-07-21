@@ -13,15 +13,16 @@ EMAIL = os.environ.get("EMAIL") or ""
 PASSWORD = os.environ.get("PASSWORD") or ""
 TG_BOT_TOKEN = os.environ.get("TG_BOT_TOKEN") or ""
 TG_CHAT_ID = os.environ.get("TG_CHAT_ID") or ""
-# 代理（任选一种）
-# 1) PROXY=http://user:pass@host:port  或 socks5://user:pass@host:port  或 host:port
-# 2) PROXY_HOST + PROXY_PORT + 可选 PROXY_USER / PROXY_PASS + 可选 PROXY_SCHEME
+# 代理：Actions 里由 Hysteria2 客户端提供本地 SOCKS5
+#   PROXY=socks5://127.0.0.1:1080
+# 也支持 http://user:pass@host:port / host:port 等
+# 拆分写法：PROXY_HOST + PROXY_PORT + 可选 PROXY_USER / PROXY_PASS / PROXY_SCHEME
 PROXY = (os.environ.get("PROXY") or "").strip()
 PROXY_HOST = (os.environ.get("PROXY_HOST") or "").strip()
 PROXY_PORT = (os.environ.get("PROXY_PORT") or "").strip()
 PROXY_USER = (os.environ.get("PROXY_USER") or "").strip()
 PROXY_PASS = (os.environ.get("PROXY_PASS") or "").strip()
-PROXY_SCHEME = (os.environ.get("PROXY_SCHEME") or "http").strip().lower()
+PROXY_SCHEME = (os.environ.get("PROXY_SCHEME") or "socks5").strip().lower()
 
 BASE_URL = "https://client.therose.cloud/login"
 
@@ -478,7 +479,11 @@ def main():
 
     req_proxies = None
     if proxy:
-        if proxy.startswith("socks"):
+        # requests + PySocks：socks5h 让远端做 DNS，避免 DNS 泄漏/解析失败
+        if proxy.startswith("socks5://"):
+            p = "socks5h://" + proxy[len("socks5://") :]
+            req_proxies = {"http": p, "https": p}
+        elif proxy.startswith("socks5h://") or proxy.startswith("socks4"):
             req_proxies = {"http": proxy, "https": proxy}
         elif "://" in proxy:
             req_proxies = {"http": proxy, "https": proxy}
